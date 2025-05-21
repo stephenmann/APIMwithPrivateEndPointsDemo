@@ -41,6 +41,11 @@ This project demonstrates the integration of Azure API Management with private e
    # Bash
    ./deploy.sh --subscription "<your-subscription-id>"
    ```
+3. Alternatively, use the GitHub Actions workflow:
+   - Go to the Actions tab in your repository
+   - Select the "Deploy APIM Infrastructure" workflow
+   - Click "Run workflow"
+   - Fill in the deployment parameters
 
 ## Architecture
 
