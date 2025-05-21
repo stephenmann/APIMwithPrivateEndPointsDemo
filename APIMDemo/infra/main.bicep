@@ -58,6 +58,9 @@ module apimModule 'modules/apim.bicep' = {
     subnetId: networkModule.outputs.apimSubnetId
     apiBackendUrl: apiBackendUrl
   }
+  dependsOn: [
+    networkModule
+  ]
 }
 
 // Private endpoint resources
@@ -71,6 +74,9 @@ module privateEndpointModule 'modules/privateendpoint.bicep' = {
     apimId: apimModule.outputs.apimId
     subnetId: networkModule.outputs.peSubnetId
   }
+  dependsOn: [
+    apimModule
+  ]
 }
 
 // Output values

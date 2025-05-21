@@ -62,7 +62,7 @@ resource apiV1 'Microsoft.ApiManagement/service/apis@2023-03-01-preview' = {
       'https'
     ]
     path: 'v1'
-    format: 'swagger-json'
+    format: 'openapi+json'
     value: loadTextContent('../api-definitions/api-v1.json')
     serviceUrl: '${apiBackendUrl}/api/v1'
   }
@@ -80,7 +80,7 @@ resource apiV2 'Microsoft.ApiManagement/service/apis@2023-03-01-preview' = {
       'https'
     ]
     path: 'v2'
-    format: 'swagger-json'
+    format: 'openapi+json'
     value: loadTextContent('../api-definitions/api-v2.json')
     serviceUrl: '${apiBackendUrl}/api/v2'
   }
