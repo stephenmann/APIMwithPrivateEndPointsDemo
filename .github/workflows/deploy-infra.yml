@@ -1,0 +1,74 @@
+name: Deploy APIM Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      subscriptionId:
+        description: 'Azure Subscription ID'
+        required: true
+      resourceGroup:
+        description: 'Resource Group name'
+        required: true
+        default: 'apim-demo-rg'
+      location:
+        description: 'Azure region'
+        required: true
+        default: 'eastus'
+      environment:
+        description: 'Environment (dev, test, prod)'
+        required: true
+        default: 'dev'
+      namePrefix:
+        description: 'Name prefix for resources'
+        required: true
+        default: 'apim-demo'
+      adminEmail:
+        description: 'Admin email for APIM'
+        required: true
+        default: 'admin@example.com'
+      orgName:
+        description: 'Organization name for APIM'
+        required: true
+        default: 'APIM Demo Organization'
+      apimSku:
+        description: 'APIM SKU (Developer, Basic, Standard, Premium)'
+        required: true
+        default: 'Developer'
+        type: choice
+        options:
+          - Developer
+          - Basic
+          - Standard
+          - Premium
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Azure CLI
+        uses: azure/setup-azure-cli@v1
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create Resource Group
+        run: |
+          az group create --name "${{ github.event.inputs.resourceGroup }}" --location "${{ github.event.inputs.location }}"
+
+      - name: Deploy Bicep template
+        working-directory: APIMDemo/infra
+        run: |
+          az deployment group create \
+            --resource-group "${{ github.event.inputs.resourceGroup }}" \
+            --template-file main.bicep \
+            --parameters location="${{ github.event.inputs.location }}" \
+                       environment="${{ github.event.inputs.environment }}" \
+                       namePrefix="${{ github.event.inputs.namePrefix }}" \
+                       apimAdminEmail="${{ github.event.inputs.adminEmail }}" \
+                       apimOrgName="${{ github.event.inputs.orgName }}" \
+                       apimSku="${{ github.event.inputs.apimSku }}"

@@ -96,6 +96,18 @@ chmod +x deploy.sh
 ./deploy.sh --subscription "<your-subscription-id>"
 ```
 
+#### Option 3: Using GitHub Actions
+
+You can deploy the infrastructure using the provided GitHub Action workflow:
+
+1. Configure Azure credentials as GitHub secrets in your repository settings
+2. Go to the Actions tab in your repository
+3. Select the "Deploy APIM Infrastructure" workflow
+4. Click "Run workflow" 
+5. Fill in the required parameters and run the workflow
+
+> Note: You'll need to add an `AZURE_CREDENTIALS` secret containing a service principal JSON to authenticate with Azure.
+
 ## Infrastructure Components
 
 The deployed infrastructure includes:
