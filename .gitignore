@@ -142,3 +142,7 @@ obj/
 
 # Tests
 TestResults/
+
+APIMDemo/bin/
+APIMDemo/obj/
+
