@@ -37,6 +37,17 @@ resource apim 'Microsoft.ApiManagement/service@2023-03-01-preview' = {
   }
 }
 
+// Create API Version Set
+resource apiVersionSet 'Microsoft.ApiManagement/service/apiVersionSets@2023-03-01-preview' = {
+  parent: apim
+  name: 'demo-api-versions'
+  properties: {
+    displayName: 'Demo API Versions'
+    versioningScheme: 'Segment'
+    description: 'Version set for the Demo API'
+  }
+}
+
 // Product for API
 resource apiProduct 'Microsoft.ApiManagement/service/products@2023-03-01-preview' = {
   parent: apim
@@ -63,8 +74,10 @@ resource apiV1 'Microsoft.ApiManagement/service/apis@2023-03-01-preview' = {
     ]
     path: 'v1'
     format: 'openapi+json'
-    value: loadTextContent('../api-definitions/api-v1.json')
+    value: loadTextContent('../api-definitions/api-v1-modified.json')
     serviceUrl: '${apiBackendUrl}/api/v1'
+    apiVersion: 'v1'
+    apiVersionSetId: apiVersionSet.id
   }
 }
 
@@ -81,12 +94,14 @@ resource apiV2 'Microsoft.ApiManagement/service/apis@2023-03-01-preview' = {
     ]
     path: 'v2'
     format: 'openapi+json'
-    value: loadTextContent('../api-definitions/api-v2.json')
+    value: loadTextContent('../api-definitions/api-v2-modified.json')
     serviceUrl: '${apiBackendUrl}/api/v2'
+    apiVersion: 'v2'
+    apiVersionSetId: apiVersionSet.id
   }
 }
 
-// Associate products with APIs
+// Associate products with APIs - do this for each API separately
 resource productApiV1 'Microsoft.ApiManagement/service/products/apis@2023-03-01-preview' = {
   parent: apiProduct
   name: apiV1.name
