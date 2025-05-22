@@ -1,0 +1,2205 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.35.1.17967",
+      "templateHash": "12139965504434532342"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "The location for all resources"
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "dev",
+      "metadata": {
+        "description": "Environment name (dev, test, prod)"
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "apim-demo",
+      "metadata": {
+        "description": "Name prefix for all resources"
+      }
+    },
+    "apimAdminEmail": {
+      "type": "string",
+      "defaultValue": "admin@example.com",
+      "metadata": {
+        "description": "Admin email for APIM notifications"
+      }
+    },
+    "apimOrgName": {
+      "type": "string",
+      "defaultValue": "APIM Demo Organization",
+      "metadata": {
+        "description": "Organization name for APIM"
+      }
+    },
+    "apimSku": {
+      "type": "string",
+      "defaultValue": "Developer",
+      "allowedValues": [
+        "Developer",
+        "Basic",
+        "Standard",
+        "Premium"
+      ],
+      "metadata": {
+        "description": "APIM SKU"
+      }
+    }
+  },
+  "variables": {
+    "uniqueNamePrefix": "[format('{0}-{1}', parameters('namePrefix'), parameters('environment'))]",
+    "vnetName": "[format('{0}-vnet', variables('uniqueNamePrefix'))]",
+    "apimName": "[format('{0}-apim', variables('uniqueNamePrefix'))]",
+    "appServicePlanName": "[format('{0}-asp', variables('uniqueNamePrefix'))]",
+    "appName": "[format('{0}-api', variables('uniqueNamePrefix'))]",
+    "privateEndpointName": "[format('{0}-pe', variables('uniqueNamePrefix'))]",
+    "appPrivateEndpointName": "[format('{0}-app-pe', variables('uniqueNamePrefix'))]",
+    "privateDnsZoneName": "[format('{0}-privatelink.azure-api.net', parameters('namePrefix'))]",
+    "appPrivateDnsZoneName": "privatelink.azurewebsites.net",
+    "apiBackendUrl": "[format('https://{0}.azurewebsites.net', variables('appName'))]",
+    "frontDoorName": "[format('{0}-fd', variables('uniqueNamePrefix'))]",
+    "frontDoorEndpointName": "[format('{0}{1}', parameters('namePrefix'), parameters('environment'))]",
+    "appInsightsName": "[format('{0}-ai', variables('uniqueNamePrefix'))]",
+    "logAnalyticsWorkspaceName": "[format('{0}-law', variables('uniqueNamePrefix'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "networkDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "vnetName": {
+            "value": "[variables('vnetName')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.logAnalyticsWorkspaceId.value]"
+          },
+          "enableDiagnostics": {
+            "value": true
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "9078565600793375555"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location for all resources"
+              }
+            },
+            "vnetName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Virtual Network"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for all resources"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Log Analytics Workspace ID for diagnostics"
+              }
+            },
+            "enableDiagnostics": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable diagnostic settings"
+              }
+            }
+          },
+          "variables": {
+            "addressPrefix": "10.0.0.0/16",
+            "peSubnetName": "PrivateEndpointSubnet",
+            "peSubnetAddressPrefix": "10.0.0.0/24",
+            "apimSubnetName": "ApimSubnet",
+            "apimSubnetAddressPrefix": "10.0.1.0/24",
+            "apiSubnetName": "ApiSubnet",
+            "apiSubnetAddressPrefix": "10.0.2.0/24",
+            "plsSubnetName": "PrivateLinkServiceSubnet",
+            "plsSubnetAddressPrefix": "10.0.3.0/24"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}-nsg', variables('apimSubnetName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Management_Endpoint",
+                    "properties": {
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "3443",
+                      "sourceAddressPrefix": "ApiManagement",
+                      "destinationAddressPrefix": "VirtualNetwork",
+                      "access": "Allow",
+                      "priority": 100,
+                      "direction": "Inbound"
+                    }
+                  },
+                  {
+                    "name": "Allow_HTTPS",
+                    "properties": {
+                      "protocol": "Tcp",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "443",
+                      "sourceAddressPrefix": "*",
+                      "destinationAddressPrefix": "VirtualNetwork",
+                      "access": "Allow",
+                      "priority": 110,
+                      "direction": "Inbound"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('vnetName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "[variables('addressPrefix')]"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "[variables('peSubnetName')]",
+                    "properties": {
+                      "addressPrefix": "[variables('peSubnetAddressPrefix')]",
+                      "privateEndpointNetworkPolicies": "Disabled"
+                    }
+                  },
+                  {
+                    "name": "[variables('apimSubnetName')]",
+                    "properties": {
+                      "addressPrefix": "[variables('apimSubnetAddressPrefix')]",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', variables('apimSubnetName')))]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "[variables('apiSubnetName')]",
+                    "properties": {
+                      "addressPrefix": "[variables('apiSubnetAddressPrefix')]",
+                      "delegations": [
+                        {
+                          "name": "delegation",
+                          "properties": {
+                            "serviceName": "Microsoft.Web/serverFarms"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "[variables('plsSubnetName')]",
+                    "properties": {
+                      "addressPrefix": "[variables('plsSubnetAddressPrefix')]",
+                      "privateLinkServiceNetworkPolicies": "Disabled"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', variables('apimSubnetName')))]"
+              ]
+            },
+            {
+              "condition": "[and(parameters('enableDiagnostics'), not(empty(parameters('logAnalyticsWorkspaceId'))))]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2022-09-01",
+              "name": "[format('{0}-diagnostics', parameters('vnetName'))]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "resourceId": {
+                    "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+                  },
+                  "diagnosticSettingsName": {
+                    "value": "[format('{0}-diagnostics', parameters('vnetName'))]"
+                  },
+                  "logAnalyticsWorkspaceId": {
+                    "value": "[parameters('logAnalyticsWorkspaceId')]"
+                  },
+                  "resourceType": {
+                    "value": "vnet"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.35.1.17967",
+                      "templateHash": "9906954415679837895"
+                    }
+                  },
+                  "parameters": {
+                    "resourceId": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Resource ID of the resource to enable diagnostics on"
+                      }
+                    },
+                    "diagnosticSettingsName": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Name for the diagnostic settings"
+                      }
+                    },
+                    "logAnalyticsWorkspaceId": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Log Analytics Workspace ID"
+                      }
+                    },
+                    "resourceType": {
+                      "type": "string",
+                      "allowedValues": [
+                        "vnet",
+                        "nsg",
+                        "pip",
+                        "loadBalancer",
+                        "appService"
+                      ],
+                      "metadata": {
+                        "description": "Resource type to enable diagnostics for"
+                      }
+                    }
+                  },
+                  "variables": {
+                    "logCategories": {
+                      "vnet": [
+                        {
+                          "category": "VMProtectionAlerts",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "nsg": [
+                        {
+                          "category": "NetworkSecurityGroupEvent",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "NetworkSecurityGroupRuleCounter",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "pip": [
+                        {
+                          "category": "DDoSProtectionNotifications",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "DDoSMitigationFlowLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "DDoSMitigationReports",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "loadBalancer": [
+                        {
+                          "category": "LoadBalancerAlertEvent",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "LoadBalancerProbeHealthStatus",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "appService": [
+                        {
+                          "category": "AppServiceHTTPLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceConsoleLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceAppLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceAuditLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceIPSecAuditLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServicePlatformLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "resources": [],
+                  "outputs": {
+                    "diagnosticsObject": {
+                      "type": "object",
+                      "value": {
+                        "name": "[parameters('diagnosticSettingsName')]",
+                        "properties": {
+                          "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                          "logs": "[variables('logCategories')[parameters('resourceType')]]",
+                          "metrics": [
+                            {
+                              "category": "AllMetrics",
+                              "enabled": true,
+                              "retentionPolicy": {
+                                "days": 30,
+                                "enabled": true
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "targetResourceId": {
+                      "type": "string",
+                      "value": "[parameters('resourceId')]"
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+              ]
+            },
+            {
+              "condition": "[and(parameters('enableDiagnostics'), not(empty(parameters('logAnalyticsWorkspaceId'))))]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2022-09-01",
+              "name": "[format('{0}-diagnostics', format('{0}-nsg', variables('apimSubnetName')))]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "resourceId": {
+                    "value": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', variables('apimSubnetName')))]"
+                  },
+                  "diagnosticSettingsName": {
+                    "value": "[format('{0}-diagnostics', format('{0}-nsg', variables('apimSubnetName')))]"
+                  },
+                  "logAnalyticsWorkspaceId": {
+                    "value": "[parameters('logAnalyticsWorkspaceId')]"
+                  },
+                  "resourceType": {
+                    "value": "nsg"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.35.1.17967",
+                      "templateHash": "9906954415679837895"
+                    }
+                  },
+                  "parameters": {
+                    "resourceId": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Resource ID of the resource to enable diagnostics on"
+                      }
+                    },
+                    "diagnosticSettingsName": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Name for the diagnostic settings"
+                      }
+                    },
+                    "logAnalyticsWorkspaceId": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Log Analytics Workspace ID"
+                      }
+                    },
+                    "resourceType": {
+                      "type": "string",
+                      "allowedValues": [
+                        "vnet",
+                        "nsg",
+                        "pip",
+                        "loadBalancer",
+                        "appService"
+                      ],
+                      "metadata": {
+                        "description": "Resource type to enable diagnostics for"
+                      }
+                    }
+                  },
+                  "variables": {
+                    "logCategories": {
+                      "vnet": [
+                        {
+                          "category": "VMProtectionAlerts",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "nsg": [
+                        {
+                          "category": "NetworkSecurityGroupEvent",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "NetworkSecurityGroupRuleCounter",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "pip": [
+                        {
+                          "category": "DDoSProtectionNotifications",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "DDoSMitigationFlowLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "DDoSMitigationReports",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "loadBalancer": [
+                        {
+                          "category": "LoadBalancerAlertEvent",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "LoadBalancerProbeHealthStatus",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "appService": [
+                        {
+                          "category": "AppServiceHTTPLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceConsoleLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceAppLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceAuditLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceIPSecAuditLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServicePlatformLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "resources": [],
+                  "outputs": {
+                    "diagnosticsObject": {
+                      "type": "object",
+                      "value": {
+                        "name": "[parameters('diagnosticSettingsName')]",
+                        "properties": {
+                          "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                          "logs": "[variables('logCategories')[parameters('resourceType')]]",
+                          "metrics": [
+                            {
+                              "category": "AllMetrics",
+                              "enabled": true,
+                              "retentionPolicy": {
+                                "days": 30,
+                                "enabled": true
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "targetResourceId": {
+                      "type": "string",
+                      "value": "[parameters('resourceId')]"
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', variables('apimSubnetName')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vnetId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+            },
+            "peSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')), '2023-05-01').subnets[0].id]"
+            },
+            "apimSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')), '2023-05-01').subnets[1].id]"
+            },
+            "apiSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')), '2023-05-01').subnets[2].id]"
+            },
+            "plsSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')), '2023-05-01').subnets[3].id]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "appInsightsDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "appInsightsName": {
+            "value": "[variables('appInsightsName')]"
+          },
+          "logAnalyticsWorkspaceName": {
+            "value": "[variables('logAnalyticsWorkspaceName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "15577809333220645104"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location for all resources"
+              }
+            },
+            "appInsightsName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Application Insights resource"
+              }
+            },
+            "logAnalyticsWorkspaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Log Analytics workspace"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2022-10-01",
+              "name": "[parameters('logAnalyticsWorkspaceName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 30,
+                "features": {
+                  "enableLogAccessUsingOnlyResourcePermissions": true
+                },
+                "workspaceCapping": {
+                  "dailyQuotaGb": -1
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[parameters('appInsightsName')]",
+              "location": "[parameters('location')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+                "RetentionInDays": 90,
+                "IngestionMode": "LogAnalytics",
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "appInsightsId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+            },
+            "appInsightsInstrumentationKey": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('appInsightsName')), '2020-02-02').InstrumentationKey]"
+            },
+            "appInsightsConnectionString": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('appInsightsName')), '2020-02-02').ConnectionString]"
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "appServiceDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "appName": {
+            "value": "[variables('appName')]"
+          },
+          "appServicePlanName": {
+            "value": "[variables('appServicePlanName')]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.appInsightsConnectionString.value]"
+          },
+          "appInsightsInstrumentationKey": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.appInsightsInstrumentationKey.value]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.logAnalyticsWorkspaceId.value]"
+          },
+          "enableDiagnostics": {
+            "value": true
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "12200406160163381823"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location for all resources"
+              }
+            },
+            "appName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the App Service"
+              }
+            },
+            "appServicePlanName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the App Service Plan"
+              }
+            },
+            "appInsightsConnectionString": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights Connection String"
+              }
+            },
+            "appInsightsInstrumentationKey": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights Instrumentation Key"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Log Analytics Workspace ID for diagnostics"
+              }
+            },
+            "enableDiagnostics": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable diagnostic settings"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2022-09-01",
+              "name": "[parameters('appServicePlanName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "S1",
+                "tier": "Standard"
+              },
+              "properties": {
+                "reserved": false
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2022-09-01",
+              "name": "[parameters('appName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                "httpsOnly": true,
+                "siteConfig": {
+                  "netFrameworkVersion": "v7.0",
+                  "appSettings": [
+                    {
+                      "name": "ASPNETCORE_ENVIRONMENT",
+                      "value": "Production"
+                    },
+                    {
+                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                      "value": "[parameters('appInsightsConnectionString')]"
+                    },
+                    {
+                      "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+                      "value": "~2"
+                    },
+                    {
+                      "name": "XDT_MicrosoftApplicationInsights_Mode",
+                      "value": "default"
+                    },
+                    {
+                      "name": "InstrumentationEngine_EXTENSION_VERSION",
+                      "value": "~1"
+                    },
+                    {
+                      "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+                      "value": "[parameters('appInsightsInstrumentationKey')]"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+              ]
+            },
+            {
+              "condition": "[and(parameters('enableDiagnostics'), not(empty(parameters('logAnalyticsWorkspaceId'))))]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2022-09-01",
+              "name": "[format('{0}-diagnostics', parameters('appName'))]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "resourceId": {
+                    "value": "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+                  },
+                  "diagnosticSettingsName": {
+                    "value": "[format('{0}-diagnostics', parameters('appName'))]"
+                  },
+                  "logAnalyticsWorkspaceId": {
+                    "value": "[parameters('logAnalyticsWorkspaceId')]"
+                  },
+                  "resourceType": {
+                    "value": "appService"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.35.1.17967",
+                      "templateHash": "9906954415679837895"
+                    }
+                  },
+                  "parameters": {
+                    "resourceId": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Resource ID of the resource to enable diagnostics on"
+                      }
+                    },
+                    "diagnosticSettingsName": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Name for the diagnostic settings"
+                      }
+                    },
+                    "logAnalyticsWorkspaceId": {
+                      "type": "string",
+                      "metadata": {
+                        "description": "Log Analytics Workspace ID"
+                      }
+                    },
+                    "resourceType": {
+                      "type": "string",
+                      "allowedValues": [
+                        "vnet",
+                        "nsg",
+                        "pip",
+                        "loadBalancer",
+                        "appService"
+                      ],
+                      "metadata": {
+                        "description": "Resource type to enable diagnostics for"
+                      }
+                    }
+                  },
+                  "variables": {
+                    "logCategories": {
+                      "vnet": [
+                        {
+                          "category": "VMProtectionAlerts",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "nsg": [
+                        {
+                          "category": "NetworkSecurityGroupEvent",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "NetworkSecurityGroupRuleCounter",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "pip": [
+                        {
+                          "category": "DDoSProtectionNotifications",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "DDoSMitigationFlowLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "DDoSMitigationReports",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "loadBalancer": [
+                        {
+                          "category": "LoadBalancerAlertEvent",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "LoadBalancerProbeHealthStatus",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ],
+                      "appService": [
+                        {
+                          "category": "AppServiceHTTPLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceConsoleLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceAppLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceAuditLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServiceIPSecAuditLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        },
+                        {
+                          "category": "AppServicePlatformLogs",
+                          "enabled": true,
+                          "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "resources": [],
+                  "outputs": {
+                    "diagnosticsObject": {
+                      "type": "object",
+                      "value": {
+                        "name": "[parameters('diagnosticSettingsName')]",
+                        "properties": {
+                          "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                          "logs": "[variables('logCategories')[parameters('resourceType')]]",
+                          "metrics": [
+                            {
+                              "category": "AllMetrics",
+                              "enabled": true,
+                              "retentionPolicy": {
+                                "days": 30,
+                                "enabled": true
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "targetResourceId": {
+                      "type": "string",
+                      "value": "[parameters('resourceId')]"
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "apiUrl": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('appName')), '2022-09-01').defaultHostName)]"
+            },
+            "apiId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "apimDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "apimName": {
+            "value": "[variables('apimName')]"
+          },
+          "apimSku": {
+            "value": "[parameters('apimSku')]"
+          },
+          "apimAdminEmail": {
+            "value": "[parameters('apimAdminEmail')]"
+          },
+          "apimOrgName": {
+            "value": "[parameters('apimOrgName')]"
+          },
+          "subnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'networkDeploy'), '2022-09-01').outputs.apimSubnetId.value]"
+          },
+          "apiBackendUrl": {
+            "value": "[variables('apiBackendUrl')]"
+          },
+          "appInsightsId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.appInsightsId.value]"
+          },
+          "appInsightsInstrumentationKey": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.appInsightsInstrumentationKey.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "5614270781692625841"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location for all resources"
+              }
+            },
+            "apimName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the API Management service"
+              }
+            },
+            "apimSku": {
+              "type": "string",
+              "metadata": {
+                "description": "SKU of the API Management service"
+              }
+            },
+            "apimAdminEmail": {
+              "type": "string",
+              "metadata": {
+                "description": "Admin email address"
+              }
+            },
+            "apimOrgName": {
+              "type": "string",
+              "metadata": {
+                "description": "Organization name"
+              }
+            },
+            "subnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "The subnet ID for APIM"
+              }
+            },
+            "apiBackendUrl": {
+              "type": "string",
+              "metadata": {
+                "description": "The backend API URL"
+              }
+            },
+            "appInsightsInstrumentationKey": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Application Insights Instrumentation Key"
+              }
+            },
+            "appInsightsId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Application Insights Resource ID"
+              }
+            }
+          },
+          "variables": {
+            "$fxv#0": "{\r\n  \"swagger\": \"2.0\",\r\n  \"info\": {\r\n    \"title\": \"APIM Demo API v1\",\r\n    \"version\": \"1.0\",\r\n    \"description\": \"A sample API for demonstrating Azure API Management\"\r\n  },\r\n  \"host\": \"apibackend.azurewebsites.net\",\r\n  \"basePath\": \"/api/v1\",\r\n  \"schemes\": [\r\n    \"https\"\r\n  ],\r\n  \"paths\": {\r\n    \"/products\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Products_v1\"\r\n        ],\r\n        \"summary\": \"Get all products\",\r\n        \"operationId\": \"GetProductsV1\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"type\": \"array\",\r\n              \"items\": {\r\n                \"$ref\": \"#/definitions/Product\"\r\n              }\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"post\": {\r\n        \"tags\": [\r\n          \"Products_v1\"\r\n        ],\r\n        \"summary\": \"Create a new product\",\r\n        \"operationId\": \"CreateProductV1\",\r\n        \"consumes\": [\r\n          \"application/json\"\r\n        ],\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"body\",\r\n            \"name\": \"product\",\r\n            \"description\": \"Product to create\",\r\n            \"required\": true,\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Product\"\r\n            }\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"201\": {\r\n            \"description\": \"Created\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Product\"\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/products/{id}\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Products_v1\"\r\n        ],\r\n        \"summary\": \"Get a product by ID\",\r\n        \"operationId\": \"GetProductByIdV1\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Product ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Product\"\r\n            }\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"put\": {\r\n        \"tags\": [\r\n          \"Products_v1\"\r\n        ],\r\n        \"summary\": \"Update a product\",\r\n        \"operationId\": \"UpdateProductV1\",\r\n        \"consumes\": [\r\n          \"application/json\"\r\n        ],\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Product ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          },\r\n          {\r\n            \"in\": \"body\",\r\n            \"name\": \"product\",\r\n            \"description\": \"Updated product\",\r\n            \"required\": true,\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Product\"\r\n            }\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Product\"\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"delete\": {\r\n        \"tags\": [\r\n          \"Products_v1\"\r\n        ],\r\n        \"summary\": \"Delete a product\",\r\n        \"operationId\": \"DeleteProductV1\",\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Product ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"204\": {\r\n            \"description\": \"No Content\"\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/orders\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Orders_v1\"\r\n        ],\r\n        \"summary\": \"Get all orders\",\r\n        \"operationId\": \"GetOrdersV1\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"type\": \"array\",\r\n              \"items\": {\r\n                \"$ref\": \"#/definitions/Order\"\r\n              }\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"post\": {\r\n        \"tags\": [\r\n          \"Orders_v1\"\r\n        ],\r\n        \"summary\": \"Create a new order\",\r\n        \"operationId\": \"CreateOrderV1\",\r\n        \"consumes\": [\r\n          \"application/json\"\r\n        ],\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"body\",\r\n            \"name\": \"order\",\r\n            \"description\": \"Order to create\",\r\n            \"required\": true,\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Order\"\r\n            }\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"201\": {\r\n            \"description\": \"Created\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Order\"\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/orders/{id}\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Orders_v1\"\r\n        ],\r\n        \"summary\": \"Get an order by ID\",\r\n        \"operationId\": \"GetOrderByIdV1\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Order ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/Order\"\r\n            }\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    }\r\n  },\r\n  \"definitions\": {\r\n    \"Product\": {\r\n      \"type\": \"object\",\r\n      \"properties\": {\r\n        \"id\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"name\": {\r\n          \"type\": \"string\"\r\n        },\r\n        \"description\": {\r\n          \"type\": \"string\"\r\n        },\r\n        \"price\": {\r\n          \"type\": \"number\",\r\n          \"format\": \"double\"\r\n        }\r\n      }\r\n    },\r\n    \"Order\": {\r\n      \"type\": \"object\",\r\n      \"properties\": {\r\n        \"id\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"customerId\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"orderDate\": {\r\n          \"type\": \"string\",\r\n          \"format\": \"date-time\"\r\n        },\r\n        \"productId\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"quantity\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        }\r\n      }\r\n    }\r\n  }\r\n}\r\n",
+            "$fxv#1": "{\r\n  \"swagger\": \"2.0\",\r\n  \"info\": {\r\n    \"title\": \"APIM Demo API v2\",\r\n    \"version\": \"2.0\",\r\n    \"description\": \"A sample API v2 for demonstrating Azure API Management with enhanced features\"\r\n  },\r\n  \"host\": \"apibackend.azurewebsites.net\",\r\n  \"basePath\": \"/api/v2\",\r\n  \"schemes\": [\r\n    \"https\"\r\n  ],\r\n  \"paths\": {\r\n    \"/products\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Products_v2\"\r\n        ],\r\n        \"summary\": \"Get all products\",\r\n        \"operationId\": \"GetProductsV2\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"type\": \"array\",\r\n              \"items\": {\r\n                \"$ref\": \"#/definitions/ProductV2\"\r\n              }\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"post\": {\r\n        \"tags\": [\r\n          \"Products_v2\"\r\n        ],\r\n        \"summary\": \"Create a new product\",\r\n        \"operationId\": \"CreateProductV2\",\r\n        \"consumes\": [\r\n          \"application/json\"\r\n        ],\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"body\",\r\n            \"name\": \"product\",\r\n            \"description\": \"Product to create\",\r\n            \"required\": true,\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/ProductV2\"\r\n            }\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"201\": {\r\n            \"description\": \"Created\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/ProductV2\"\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/products/{id}\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Products_v2\"\r\n        ],\r\n        \"summary\": \"Get a product by ID\",\r\n        \"operationId\": \"GetProductByIdV2\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Product ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/ProductV2\"\r\n            }\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"put\": {\r\n        \"tags\": [\r\n          \"Products_v2\"\r\n        ],\r\n        \"summary\": \"Update a product\",\r\n        \"operationId\": \"UpdateProductV2\",\r\n        \"consumes\": [\r\n          \"application/json\"\r\n        ],\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Product ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          },\r\n          {\r\n            \"in\": \"body\",\r\n            \"name\": \"product\",\r\n            \"description\": \"Updated product\",\r\n            \"required\": true,\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/ProductV2\"\r\n            }\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/ProductV2\"\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"delete\": {\r\n        \"tags\": [\r\n          \"Products_v2\"\r\n        ],\r\n        \"summary\": \"Delete a product\",\r\n        \"operationId\": \"DeleteProductV2\",\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Product ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"204\": {\r\n            \"description\": \"No Content\"\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/products/featured\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Products_v2\"\r\n        ],\r\n        \"summary\": \"Get featured products\",\r\n        \"operationId\": \"GetFeaturedProductsV2\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"type\": \"array\",\r\n              \"items\": {\r\n                \"$ref\": \"#/definitions/ProductV2\"\r\n              }\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/orders\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Orders_v2\"\r\n        ],\r\n        \"summary\": \"Get all orders\",\r\n        \"operationId\": \"GetOrdersV2\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"type\": \"array\",\r\n              \"items\": {\r\n                \"$ref\": \"#/definitions/OrderV2\"\r\n              }\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      },\r\n      \"post\": {\r\n        \"tags\": [\r\n          \"Orders_v2\"\r\n        ],\r\n        \"summary\": \"Create a new order\",\r\n        \"operationId\": \"CreateOrderV2\",\r\n        \"consumes\": [\r\n          \"application/json\"\r\n        ],\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"body\",\r\n            \"name\": \"order\",\r\n            \"description\": \"Order to create\",\r\n            \"required\": true,\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/OrderV2\"\r\n            }\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"201\": {\r\n            \"description\": \"Created\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/OrderV2\"\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/orders/{id}\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Orders_v2\"\r\n        ],\r\n        \"summary\": \"Get an order by ID\",\r\n        \"operationId\": \"GetOrderByIdV2\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"id\",\r\n            \"description\": \"Order ID\",\r\n            \"required\": true,\r\n            \"type\": \"integer\",\r\n            \"format\": \"int32\"\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"$ref\": \"#/definitions/OrderV2\"\r\n            }\r\n          },\r\n          \"404\": {\r\n            \"description\": \"Not Found\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/orders/status/{status}\": {\r\n      \"get\": {\r\n        \"tags\": [\r\n          \"Orders_v2\"\r\n        ],\r\n        \"summary\": \"Get orders by status\",\r\n        \"operationId\": \"GetOrdersByStatusV2\",\r\n        \"produces\": [\r\n          \"application/json\"\r\n        ],\r\n        \"parameters\": [\r\n          {\r\n            \"in\": \"path\",\r\n            \"name\": \"status\",\r\n            \"description\": \"Order status\",\r\n            \"required\": true,\r\n            \"type\": \"string\",\r\n            \"enum\": [\"Processing\", \"Shipped\", \"Delivered\", \"Cancelled\"]\r\n          }\r\n        ],\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Success\",\r\n            \"schema\": {\r\n              \"type\": \"array\",\r\n              \"items\": {\r\n                \"$ref\": \"#/definitions/OrderV2\"\r\n              }\r\n            }\r\n          },\r\n          \"400\": {\r\n            \"description\": \"Bad Request\"\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Server Error\"\r\n          }\r\n        }\r\n      }\r\n    }\r\n  },\r\n  \"definitions\": {\r\n    \"ProductV2\": {\r\n      \"type\": \"object\",\r\n      \"properties\": {\r\n        \"id\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"name\": {\r\n          \"type\": \"string\"\r\n        },\r\n        \"description\": {\r\n          \"type\": \"string\"\r\n        },\r\n        \"price\": {\r\n          \"type\": \"number\",\r\n          \"format\": \"double\"\r\n        },\r\n        \"category\": {\r\n          \"type\": \"string\"\r\n        },\r\n        \"inStock\": {\r\n          \"type\": \"boolean\"\r\n        },\r\n        \"rating\": {\r\n          \"type\": \"number\",\r\n          \"format\": \"float\"\r\n        },\r\n        \"tags\": {\r\n          \"type\": \"array\",\r\n          \"items\": {\r\n            \"type\": \"string\"\r\n          }\r\n        },\r\n        \"isFeatured\": {\r\n          \"type\": \"boolean\"\r\n        }\r\n      }\r\n    },\r\n    \"OrderV2\": {\r\n      \"type\": \"object\",\r\n      \"properties\": {\r\n        \"id\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"customerId\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"orderDate\": {\r\n          \"type\": \"string\",\r\n          \"format\": \"date-time\"\r\n        },\r\n        \"productId\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"quantity\": {\r\n          \"type\": \"integer\",\r\n          \"format\": \"int32\"\r\n        },\r\n        \"status\": {\r\n          \"type\": \"string\",\r\n          \"enum\": [\"Processing\", \"Shipped\", \"Delivered\", \"Cancelled\"]\r\n        },\r\n        \"shippingAddress\": {\r\n          \"type\": \"object\",\r\n          \"properties\": {\r\n            \"street\": {\r\n              \"type\": \"string\"\r\n            },\r\n            \"city\": {\r\n              \"type\": \"string\"\r\n            },\r\n            \"state\": {\r\n              \"type\": \"string\"\r\n            },\r\n            \"postalCode\": {\r\n              \"type\": \"string\"\r\n            },\r\n            \"country\": {\r\n              \"type\": \"string\"\r\n            }\r\n          }\r\n        },\r\n        \"totalPrice\": {\r\n          \"type\": \"number\",\r\n          \"format\": \"double\"\r\n        }\r\n      }\r\n    }\r\n  }\r\n}\r\n"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ApiManagement/service",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[parameters('apimName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "[parameters('apimSku')]",
+                "capacity": 1
+              },
+              "properties": {
+                "publisherEmail": "[parameters('apimAdminEmail')]",
+                "publisherName": "[parameters('apimOrgName')]",
+                "virtualNetworkType": "External",
+                "virtualNetworkConfiguration": {
+                  "subnetResourceId": "[parameters('subnetId')]"
+                }
+              }
+            },
+            {
+              "condition": "[and(not(empty(parameters('appInsightsId'))), not(empty(parameters('appInsightsInstrumentationKey'))))]",
+              "type": "Microsoft.ApiManagement/service/loggers",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}', parameters('apimName'), 'appInsightsLogger')]",
+              "properties": {
+                "loggerType": "applicationInsights",
+                "credentials": {
+                  "instrumentationKey": "[parameters('appInsightsInstrumentationKey')]"
+                },
+                "resourceId": "[parameters('appInsightsId')]",
+                "isBuffered": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/apiVersionSets",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}', parameters('apimName'), 'demo-api-versions')]",
+              "properties": {
+                "displayName": "Demo API Versions",
+                "versioningScheme": "Segment",
+                "description": "Version set for the Demo API"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/products",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}', parameters('apimName'), 'Demo-API')]",
+              "properties": {
+                "displayName": "Demo API Product",
+                "description": "This is a sample API product for demonstration purposes",
+                "subscriptionRequired": true,
+                "approvalRequired": false,
+                "state": "published"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/apis",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}', parameters('apimName'), 'demo-api-v1')]",
+              "properties": {
+                "displayName": "Demo API v1",
+                "apiRevision": "1",
+                "subscriptionRequired": true,
+                "protocols": [
+                  "https"
+                ],
+                "path": "v1",
+                "format": "openapi+json",
+                "value": "[variables('$fxv#0')]",
+                "serviceUrl": "[format('{0}/api/v1', parameters('apiBackendUrl'))]",
+                "apiVersion": "v1",
+                "apiVersionSetId": "[resourceId('Microsoft.ApiManagement/service/apiVersionSets', parameters('apimName'), 'demo-api-versions')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]",
+                "[resourceId('Microsoft.ApiManagement/service/apiVersionSets', parameters('apimName'), 'demo-api-versions')]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/apis",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}', parameters('apimName'), 'demo-api-v2')]",
+              "properties": {
+                "displayName": "Demo API v2",
+                "apiRevision": "1",
+                "subscriptionRequired": true,
+                "protocols": [
+                  "https"
+                ],
+                "path": "v2",
+                "format": "openapi+json",
+                "value": "[variables('$fxv#1')]",
+                "serviceUrl": "[format('{0}/api/v2', parameters('apiBackendUrl'))]",
+                "apiVersion": "v2",
+                "apiVersionSetId": "[resourceId('Microsoft.ApiManagement/service/apiVersionSets', parameters('apimName'), 'demo-api-versions')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]",
+                "[resourceId('Microsoft.ApiManagement/service/apiVersionSets', parameters('apimName'), 'demo-api-versions')]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/products/apis",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}/{2}', parameters('apimName'), 'Demo-API', 'demo-api-v1')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/products', parameters('apimName'), 'Demo-API')]",
+                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), 'demo-api-v1')]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/products/apis",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}/{2}', parameters('apimName'), 'Demo-API', 'demo-api-v2')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/products', parameters('apimName'), 'Demo-API')]",
+                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), 'demo-api-v2')]"
+              ]
+            },
+            {
+              "condition": "[and(not(empty(parameters('appInsightsId'))), not(empty(parameters('appInsightsInstrumentationKey'))))]",
+              "type": "Microsoft.ApiManagement/service/apis/diagnostics",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}/{2}', parameters('apimName'), 'demo-api-v1', 'applicationinsights')]",
+              "properties": {
+                "alwaysLog": "allErrors",
+                "httpCorrelationProtocol": "W3C",
+                "logClientIp": true,
+                "loggerId": "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimName'), 'appInsightsLogger')]",
+                "sampling": {
+                  "percentage": 100,
+                  "samplingType": "fixed"
+                },
+                "verbosity": "information",
+                "metrics": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimName'), 'appInsightsLogger')]",
+                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), 'demo-api-v1')]"
+              ]
+            },
+            {
+              "condition": "[and(not(empty(parameters('appInsightsId'))), not(empty(parameters('appInsightsInstrumentationKey'))))]",
+              "type": "Microsoft.ApiManagement/service/apis/diagnostics",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}/{2}', parameters('apimName'), 'demo-api-v2', 'applicationinsights')]",
+              "properties": {
+                "alwaysLog": "allErrors",
+                "httpCorrelationProtocol": "W3C",
+                "logClientIp": true,
+                "loggerId": "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimName'), 'appInsightsLogger')]",
+                "sampling": {
+                  "percentage": 100,
+                  "samplingType": "fixed"
+                },
+                "verbosity": "information",
+                "metrics": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimName'), 'appInsightsLogger')]",
+                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('apimName'), 'demo-api-v2')]"
+              ]
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/subscriptions",
+              "apiVersion": "2023-03-01-preview",
+              "name": "[format('{0}/{1}', parameters('apimName'), 'demo-subscription')]",
+              "properties": {
+                "scope": "[resourceId('Microsoft.ApiManagement/service/products', parameters('apimName'), 'Demo-API')]",
+                "displayName": "Demo Subscription",
+                "state": "active"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]",
+                "[resourceId('Microsoft.ApiManagement/service/products', parameters('apimName'), 'Demo-API')]"
+              ]
+            }
+          ],
+          "outputs": {
+            "apimId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ApiManagement/service', parameters('apimName'))]"
+            },
+            "apimUrl": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.ApiManagement/service', parameters('apimName')), '2023-03-01-preview').gatewayUrl)]"
+            },
+            "apimHostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('apimName')), '2023-03-01-preview').gatewayUrl]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy')]",
+        "[resourceId('Microsoft.Resources/deployments', 'networkDeploy')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "privateEndpointDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "privateEndpointName": {
+            "value": "[variables('privateEndpointName')]"
+          },
+          "privateDnsZoneName": {
+            "value": "[variables('privateDnsZoneName')]"
+          },
+          "vnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'networkDeploy'), '2022-09-01').outputs.vnetId.value]"
+          },
+          "apimId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'apimDeploy'), '2022-09-01').outputs.apimId.value]"
+          },
+          "subnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'networkDeploy'), '2022-09-01').outputs.peSubnetId.value]"
+          },
+          "plsSubnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'networkDeploy'), '2022-09-01').outputs.plsSubnetId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "12658184856039042695"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location for all resources"
+              }
+            },
+            "privateEndpointName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Private Endpoint"
+              }
+            },
+            "privateDnsZoneName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Private DNS Zone"
+              }
+            },
+            "vnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the Virtual Network"
+              }
+            },
+            "apimId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the API Management service"
+              }
+            },
+            "subnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the subnet for the private endpoint"
+              }
+            },
+            "plsSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the subnet for the private link service"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "[parameters('privateDnsZoneName')]",
+              "location": "global"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', parameters('privateDnsZoneName'), format('{0}-link', parameters('privateDnsZoneName')))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[parameters('vnetId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('privateDnsZoneName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('privateEndpointName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('subnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "apim-connection",
+                    "properties": {
+                      "privateLinkServiceId": "[parameters('apimId')]",
+                      "groupIds": [
+                        "gateway"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/loadBalancers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}-lb', parameters('privateEndpointName'))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "frontendIPConfigurations": [
+                  {
+                    "name": "frontendIpConfig",
+                    "properties": {
+                      "subnet": {
+                        "id": "[parameters('plsSubnetId')]"
+                      },
+                      "privateIPAllocationMethod": "Dynamic"
+                    }
+                  }
+                ],
+                "backendAddressPools": [
+                  {
+                    "name": "backendPool"
+                  }
+                ],
+                "loadBalancingRules": [
+                  {
+                    "name": "lbRule",
+                    "properties": {
+                      "frontendIPConfiguration": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', format('{0}-lb', parameters('privateEndpointName')), 'frontendIpConfig')]"
+                      },
+                      "backendAddressPool": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', format('{0}-lb', parameters('privateEndpointName')), 'backendPool')]"
+                      },
+                      "protocol": "Tcp",
+                      "frontendPort": 443,
+                      "backendPort": 443,
+                      "enableFloatingIP": false,
+                      "idleTimeoutInMinutes": 4,
+                      "probe": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/probes', format('{0}-lb', parameters('privateEndpointName')), 'healthProbe')]"
+                      }
+                    }
+                  }
+                ],
+                "probes": [
+                  {
+                    "name": "healthProbe",
+                    "properties": {
+                      "protocol": "Tcp",
+                      "port": 443,
+                      "intervalInSeconds": 5,
+                      "numberOfProbes": 2
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateLinkServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}-service', parameters('privateEndpointName'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "enableProxyProtocol": false,
+                "loadBalancerFrontendIpConfigurations": [
+                  {
+                    "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', format('{0}-lb', parameters('privateEndpointName')), 'frontendIpConfig')]"
+                  }
+                ],
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[parameters('plsSubnetId')]"
+                      },
+                      "primary": true,
+                      "privateIPAllocationMethod": "Dynamic"
+                    }
+                  }
+                ],
+                "visibility": {
+                  "subscriptions": []
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('privateEndpointName'), 'dnszonegroup')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "config",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', parameters('privateDnsZoneName'))]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('privateDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/privateEndpoints', parameters('privateEndpointName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "privateLinkServiceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateLinkServices', format('{0}-service', parameters('privateEndpointName')))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'apimDeploy')]",
+        "[resourceId('Microsoft.Resources/deployments', 'networkDeploy')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "appPrivateEndpointDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "privateEndpointName": {
+            "value": "[variables('appPrivateEndpointName')]"
+          },
+          "privateDnsZoneName": {
+            "value": "[variables('appPrivateDnsZoneName')]"
+          },
+          "vnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'networkDeploy'), '2022-09-01').outputs.vnetId.value]"
+          },
+          "appServiceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appServiceDeploy'), '2022-09-01').outputs.apiId.value]"
+          },
+          "subnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'networkDeploy'), '2022-09-01').outputs.peSubnetId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "5253151119610381716"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location for all resources"
+              }
+            },
+            "privateEndpointName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Private Endpoint"
+              }
+            },
+            "privateDnsZoneName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Private DNS Zone"
+              }
+            },
+            "vnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the Virtual Network"
+              }
+            },
+            "appServiceId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the App Service"
+              }
+            },
+            "subnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "ID of the subnet for the private endpoint"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "[parameters('privateDnsZoneName')]",
+              "location": "global"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', parameters('privateDnsZoneName'), format('{0}-link', parameters('privateDnsZoneName')))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[parameters('vnetId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('privateDnsZoneName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('privateEndpointName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('subnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "appservice-connection",
+                    "properties": {
+                      "privateLinkServiceId": "[parameters('appServiceId')]",
+                      "groupIds": [
+                        "sites"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('privateEndpointName'), 'dnszonegroup')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "config",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', parameters('privateDnsZoneName'))]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('privateDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/privateEndpoints', parameters('privateEndpointName'))]"
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'appServiceDeploy')]",
+        "[resourceId('Microsoft.Resources/deployments', 'networkDeploy')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "frontDoorDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "frontDoorName": {
+            "value": "[variables('frontDoorName')]"
+          },
+          "endpointName": {
+            "value": "[variables('frontDoorEndpointName')]"
+          },
+          "apimHostName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'apimDeploy'), '2022-09-01').outputs.apimHostName.value]"
+          },
+          "apimPrivateLinkServiceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'privateEndpointDeploy'), '2022-09-01').outputs.privateLinkServiceId.value]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2022-09-01').outputs.logAnalyticsWorkspaceId.value]"
+          },
+          "enableDiagnostics": {
+            "value": true
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.35.1.17967",
+              "templateHash": "1509117625445775477"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "defaultValue": "global",
+              "metadata": {
+                "description": "Location for Front Door profile"
+              }
+            },
+            "frontDoorName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Front Door profile"
+              }
+            },
+            "endpointName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Front Door endpoint"
+              }
+            },
+            "apimHostName": {
+              "type": "string",
+              "metadata": {
+                "description": "Origin host name for the APIM service"
+              }
+            },
+            "apimPrivateLinkServiceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "ID of the private link service for APIM"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Log Analytics Workspace ID for diagnostics"
+              }
+            },
+            "enableDiagnostics": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable diagnostic settings"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Cdn/profiles",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('frontDoorName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Premium_AzureFrontDoor"
+              }
+            },
+            {
+              "type": "Microsoft.Cdn/profiles/afdEndpoints",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('frontDoorName'), parameters('endpointName'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "enabledState": "Enabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cdn/profiles', parameters('frontDoorName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Cdn/profiles/originGroups",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('frontDoorName'), 'apim-origin-group')]",
+              "properties": {
+                "loadBalancingSettings": {
+                  "sampleSize": 4,
+                  "successfulSamplesRequired": 3,
+                  "additionalLatencyInMilliseconds": 50
+                },
+                "healthProbeSettings": {
+                  "probePath": "/",
+                  "probeRequestType": "HEAD",
+                  "probeProtocol": "Https",
+                  "probeIntervalInSeconds": 100
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cdn/profiles', parameters('frontDoorName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Cdn/profiles/originGroups/origins",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('frontDoorName'), 'apim-origin-group', 'apim-origin')]",
+              "properties": {
+                "hostName": "[parameters('apimHostName')]",
+                "httpPort": 80,
+                "httpsPort": 443,
+                "originHostHeader": "[parameters('apimHostName')]",
+                "priority": 1,
+                "weight": 1000,
+                "enabledState": "Enabled",
+                "enforceCertificateNameCheck": true,
+                "sharedPrivateLinkResource": "[if(not(empty(parameters('apimPrivateLinkServiceId'))), createObject('privateLink', createObject('id', parameters('apimPrivateLinkServiceId')), 'privateLinkLocation', parameters('location'), 'status', 'Approved', 'requestMessage', 'Auto-approved by Front Door deployment', 'groupId', 'gateway'), null())]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cdn/profiles/originGroups', parameters('frontDoorName'), 'apim-origin-group')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Cdn/profiles/afdEndpoints/routes",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('frontDoorName'), parameters('endpointName'), 'apim-route')]",
+              "properties": {
+                "originGroup": {
+                  "id": "[resourceId('Microsoft.Cdn/profiles/originGroups', parameters('frontDoorName'), 'apim-origin-group')]"
+                },
+                "supportedProtocols": [
+                  "Http",
+                  "Https"
+                ],
+                "patternsToMatch": [
+                  "/*"
+                ],
+                "forwardingProtocol": "HttpsOnly",
+                "linkToDefaultDomain": "Enabled",
+                "httpsRedirect": "Enabled",
+                "enabledState": "Enabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cdn/profiles/afdEndpoints', parameters('frontDoorName'), parameters('endpointName'))]",
+                "[resourceId('Microsoft.Cdn/profiles/originGroups', parameters('frontDoorName'), 'apim-origin-group')]"
+              ]
+            },
+            {
+              "condition": "[and(parameters('enableDiagnostics'), not(empty(parameters('logAnalyticsWorkspaceId'))))]",
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[format('Microsoft.Cdn/profiles/{0}', parameters('frontDoorName'))]",
+              "name": "[format('{0}-diagnostics', parameters('frontDoorName'))]",
+              "properties": {
+                "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                "logs": [
+                  {
+                    "category": "FrontDoorAccessLog",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "days": 30,
+                      "enabled": true
+                    }
+                  },
+                  {
+                    "category": "FrontDoorHealthProbeLog",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "days": 30,
+                      "enabled": true
+                    }
+                  },
+                  {
+                    "category": "FrontDoorWebApplicationFirewallLog",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "days": 30,
+                      "enabled": true
+                    }
+                  }
+                ],
+                "metrics": [
+                  {
+                    "category": "AllMetrics",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "days": 30,
+                      "enabled": true
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cdn/profiles', parameters('frontDoorName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "frontDoorEndpointUrl": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.Cdn/profiles/afdEndpoints', parameters('frontDoorName'), parameters('endpointName')), '2023-05-01').hostName)]"
+            },
+            "frontDoorId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Cdn/profiles', parameters('frontDoorName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'apimDeploy')]",
+        "[resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy')]",
+        "[resourceId('Microsoft.Resources/deployments', 'privateEndpointDeploy')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "apiUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appServiceDeploy'), '2022-09-01').outputs.apiUrl.value]"
+    },
+    "apimUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'apimDeploy'), '2022-09-01').outputs.apimUrl.value]"
+    },
+    "frontDoorUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'frontDoorDeploy'), '2022-09-01').outputs.frontDoorEndpointUrl.value]"
+    }
+  }
+}

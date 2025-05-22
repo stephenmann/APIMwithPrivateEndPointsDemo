@@ -43,8 +43,10 @@ az group create --name $ResourceGroup --location $Location
 
 # Deploy Bicep template
 Write-Host "Deploying infrastructure..." -ForegroundColor Cyan
+$deploymentName = "apim-deployment-$(Get-Date -Format 'yyyyMMddHHmmss')"
 az deployment group create `
     --resource-group $ResourceGroup `
+    --name $deploymentName `
     --template-file main.bicep `
     --parameters location=$Location `
                  environment=$Environment `
@@ -53,4 +55,115 @@ az deployment group create `
                  apimOrgName="$OrgName" `
                  apimSku=$ApimSku
 
-Write-Host "Deployment completed!" -ForegroundColor Green
+# Capture outputs from the deployment
+Write-Host "Retrieving deployment outputs..." -ForegroundColor Cyan
+$deploymentOutput = az deployment group show --resource-group $ResourceGroup --name $deploymentName --query properties.outputs -o json | ConvertFrom-Json
+$appServiceName = "${NamePrefix}-${Environment}-api"
+
+# Ensure App Service is ready
+Write-Host "Waiting for App Service to be ready..." -ForegroundColor Cyan
+$retryCount = 0
+$maxRetries = 10
+$ready = $false
+
+do {
+    $retryCount++
+    try {
+        $appServiceStatus = az webapp show --name $appServiceName --resource-group $ResourceGroup --query state -o tsv
+        if ($appServiceStatus -eq "Running") {
+            $ready = $true
+            Write-Host "App Service is ready!" -ForegroundColor Green
+        } else {
+            Write-Host "App Service is not ready yet. Status: $appServiceStatus. Waiting 15 seconds... (Attempt $retryCount of $maxRetries)" -ForegroundColor Yellow
+            Start-Sleep -Seconds 15
+        }
+    } catch {
+        Write-Host "Error checking App Service status. Waiting 15 seconds... (Attempt $retryCount of $maxRetries)" -ForegroundColor Yellow
+        Start-Sleep -Seconds 15
+    }
+} while (-not $ready -and $retryCount -lt $maxRetries)
+
+if (-not $ready) {
+    Write-Warning "App Service did not reach ready state after $maxRetries attempts. Continuing with deployment anyway..."
+}
+
+Write-Host "Preparing API application for deployment..." -ForegroundColor Cyan
+
+# Navigate to the API project directory
+$currentPath = Get-Location
+$projectFile = Join-Path -Path (Split-Path -Parent $currentPath) -ChildPath "APIMDemo.csproj"
+
+# Verify project exists
+if (-not (Test-Path $projectFile)) {
+    Write-Error "Could not find the API project file at $projectFile"
+    exit 1
+}
+
+# Publish the application
+Write-Host "Publishing .NET application..." -ForegroundColor Cyan
+$projectPath = Split-Path -Parent $currentPath
+try {
+    dotnet publish $projectFile -c Release -o "$projectPath/publish"
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed with exit code $LASTEXITCODE"
+    }
+} catch {
+    Write-Error "Failed to publish the application: $_"
+    exit 1
+}
+
+# Create a zip file of the published content
+Write-Host "Creating deployment package..." -ForegroundColor Cyan
+$publishFolder = "$projectPath/publish"
+$publishZipPath = "$projectPath/publish.zip"
+
+if (-not (Test-Path $publishFolder)) {
+    Write-Error "Publish folder does not exist at $publishFolder"
+    exit 1
+}
+
+if (Test-Path $publishZipPath) { Remove-Item $publishZipPath -Force }
+
+try {
+    Compress-Archive -Path "$publishFolder/*" -DestinationPath $publishZipPath
+} catch {
+    Write-Error "Failed to create deployment package: $_"
+    exit 1
+}
+
+# Deploy to Azure App Service
+Write-Host "Deploying to App Service: $appServiceName" -ForegroundColor Cyan
+try {
+    az webapp deployment source config-zip `
+        --resource-group $ResourceGroup `
+        --name $appServiceName `
+        --src $publishZipPath
+    
+    if ($LASTEXITCODE -ne 0) {
+        throw "Deployment to App Service failed with exit code $LASTEXITCODE"
+    }
+} catch {
+    Write-Error "Failed to deploy to App Service: $_"
+    exit 1
+}
+
+# Display deployment information
+Write-Host "`nDeployment completed successfully!" -ForegroundColor Green
+Write-Host "`nResource Group: $ResourceGroup" -ForegroundColor Cyan
+
+# Get the URLs for API, APIM, and Front Door
+try {
+    $apiUrl = "https://$appServiceName.azurewebsites.net"
+    $apimUrl = az apim show --name "${NamePrefix}-${Environment}-apim" --resource-group $ResourceGroup --query "gatewayUrl" -o tsv
+    $frontDoorUrl = az afd endpoint show --resource-group $ResourceGroup --profile-name "${NamePrefix}-${Environment}-fd" --endpoint-name "${NamePrefix}${Environment}" --query "hostName" -o tsv
+
+    Write-Host "`nEndpoints:" -ForegroundColor Cyan
+    Write-Host "- API URL: $apiUrl" -ForegroundColor Yellow
+    Write-Host "- APIM URL: https://$apimUrl" -ForegroundColor Yellow
+    Write-Host "- Front Door URL: https://$frontDoorUrl" -ForegroundColor Yellow
+    Write-Host "`nNote: The private endpoints may take some time to fully provision." -ForegroundColor Yellow
+} catch {
+    Write-Warning "Could not retrieve all endpoint information. Please check the Azure portal for details."
+}
+
+Write-Host "`nDeployment completed!" -ForegroundColor Green

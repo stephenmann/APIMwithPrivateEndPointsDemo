@@ -24,8 +24,14 @@ var apimName = '${uniqueNamePrefix}-apim'
 var appServicePlanName = '${uniqueNamePrefix}-asp'
 var appName = '${uniqueNamePrefix}-api'
 var privateEndpointName = '${uniqueNamePrefix}-pe'
+var appPrivateEndpointName = '${uniqueNamePrefix}-app-pe'
 var privateDnsZoneName = '${namePrefix}-privatelink.azure-api.net'
+var appPrivateDnsZoneName = 'privatelink.azurewebsites.net'
 var apiBackendUrl = 'https://${appName}.azurewebsites.net'
+var frontDoorName = '${uniqueNamePrefix}-fd'
+var frontDoorEndpointName = '${namePrefix}${environment}'
+var appInsightsName = '${uniqueNamePrefix}-ai'
+var logAnalyticsWorkspaceName = '${uniqueNamePrefix}-law'
 
 // Network resources
 module networkModule 'modules/network.bicep' = {
@@ -33,6 +39,18 @@ module networkModule 'modules/network.bicep' = {
   params: {
     location: location
     vnetName: vnetName
+    logAnalyticsWorkspaceId: appInsightsModule.outputs.logAnalyticsWorkspaceId
+    enableDiagnostics: true
+  }
+}
+
+// Application Insights resources
+module appInsightsModule 'modules/appinsights.bicep' = {
+  name: 'appInsightsDeploy'
+  params: {
+    location: location
+    appInsightsName: appInsightsName
+    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
   }
 }
 
@@ -43,6 +61,10 @@ module appModule 'modules/appservice.bicep' = {
     location: location
     appName: appName
     appServicePlanName: appServicePlanName
+    appInsightsConnectionString: appInsightsModule.outputs.appInsightsConnectionString
+    appInsightsInstrumentationKey: appInsightsModule.outputs.appInsightsInstrumentationKey
+    logAnalyticsWorkspaceId: appInsightsModule.outputs.logAnalyticsWorkspaceId
+    enableDiagnostics: true
   }
 }
 
@@ -57,10 +79,12 @@ module apimModule 'modules/apim.bicep' = {
     apimOrgName: apimOrgName
     subnetId: networkModule.outputs.apimSubnetId
     apiBackendUrl: apiBackendUrl
+    appInsightsId: appInsightsModule.outputs.appInsightsId
+    appInsightsInstrumentationKey: appInsightsModule.outputs.appInsightsInstrumentationKey
   }
 }
 
-// Private endpoint resources
+// Private endpoint resources for APIM
 module privateEndpointModule 'modules/privateendpoint.bicep' = {
   name: 'privateEndpointDeploy'
   params: {
@@ -70,9 +94,38 @@ module privateEndpointModule 'modules/privateendpoint.bicep' = {
     vnetId: networkModule.outputs.vnetId
     apimId: apimModule.outputs.apimId
     subnetId: networkModule.outputs.peSubnetId
+    plsSubnetId: networkModule.outputs.plsSubnetId
+  }
+}
+
+// Private endpoint for App Service
+module appPrivateEndpointModule 'modules/appserviceprivateendpoint.bicep' = {
+  name: 'appPrivateEndpointDeploy'
+  params: {
+    location: location
+    privateEndpointName: appPrivateEndpointName
+    privateDnsZoneName: appPrivateDnsZoneName
+    vnetId: networkModule.outputs.vnetId
+    appServiceId: appModule.outputs.apiId
+    subnetId: networkModule.outputs.peSubnetId
+  }
+}
+
+// Azure Front Door
+module frontDoorModule 'modules/frontdoor.bicep' = {
+  name: 'frontDoorDeploy'
+  params: {
+    location: location
+    frontDoorName: frontDoorName
+    endpointName: frontDoorEndpointName
+    apimHostName: apimModule.outputs.apimHostName
+    apimPrivateLinkServiceId: privateEndpointModule.outputs.privateLinkServiceId
+    logAnalyticsWorkspaceId: appInsightsModule.outputs.logAnalyticsWorkspaceId
+    enableDiagnostics: true
   }
 }
 
 // Output values
 output apiUrl string = appModule.outputs.apiUrl
 output apimUrl string = apimModule.outputs.apimUrl
+output frontDoorUrl string = frontDoorModule.outputs.frontDoorEndpointUrl
