@@ -145,4 +145,6 @@ TestResults/
 
 APIMDemo/bin/
 APIMDemo/obj/
+APIMDemo/publish/
 
+publish.zip
