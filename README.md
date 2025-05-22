@@ -33,10 +33,12 @@ APIMDemo/
 │   ├── OrderService.cs
 │   └── OrderServiceV2.cs
 └── infra/                    # Infrastructure as Code (Bicep)
-    ├── main.bicep            # Main deployment template
+    ├── main.bicep            # Main deployment template (with private networking)
+    │   ├── main-lite.bicep       # Lightweight deployment template (without private networking)
     ├── modules/              # Modular Bicep templates
     │   ├── network.bicep     # VNet and subnet configuration
-    │   ├── apim.bicep        # API Management resources
+    │   ├── apim.bicep        # API Management resources (with private networking)
+    │   ├── apim-lite.bicep    # API Management resources (without private networking)
     │   ├── appservice.bicep  # Web App hosting
     │   └── privateendpoint.bicep # Private endpoint configuration
     ├── api-definitions/      # API definitions for APIM
@@ -81,19 +83,40 @@ dotnet run
 
 ### Deploying to Azure
 
-#### Option 1: Using PowerShell
+#### Full Deployment (with Private Endpoints)
+
+##### Option 1: Using PowerShell
 
 ```powershell
 cd APIMDemo/infra
 ./deploy.ps1 -SubscriptionId "<your-subscription-id>"
 ```
 
-#### Option 2: Using Bash
+##### Option 2: Using Bash
 
 ```bash
 cd APIMDemo/infra
 chmod +x deploy.sh
 ./deploy.sh --subscription "<your-subscription-id>"
+```
+
+#### Lite Deployment (without Private Networking)
+
+This option deploys only the essential components (App Service, APIM, App Insights) without private networking, private endpoints, or Front Door.
+
+##### Option 1: Using PowerShell
+
+```powershell
+cd APIMDemo/infra
+./deploy-lite.ps1 -SubscriptionId "<your-subscription-id>"
+```
+
+##### Option 2: Using Bash
+
+```bash
+cd APIMDemo/infra
+chmod +x deploy-lite.sh
+./deploy-lite.sh --subscription "<your-subscription-id>"
 ```
 
 #### Option 3: Using GitHub Actions
