@@ -158,19 +158,11 @@ resource apiV2Diagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2023
 resource apiV1ProductAssociation 'Microsoft.ApiManagement/service/products/apis@2023-03-01-preview' = {
   parent: apiProduct
   name: apiV1.name
-  dependsOn: [
-    apiProduct
-    apiV1
-  ]
 }
 
 resource apiV2ProductAssociation 'Microsoft.ApiManagement/service/products/apis@2023-03-01-preview' = {
   parent: apiProduct
   name: apiV2.name
-  dependsOn: [
-    apiProduct
-    apiV2
-  ]
 }
 
 // Output values
