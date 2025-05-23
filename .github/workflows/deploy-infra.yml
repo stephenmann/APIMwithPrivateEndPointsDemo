@@ -1,4 +1,4 @@
-name: Deploy APIM Infrastructure
+name: Deploy APIM Infrastructure and Application
 
 on:
   workflow_dispatch:
@@ -72,3 +72,34 @@ jobs:
                        apimAdminEmail="${{ github.event.inputs.adminEmail }}" \
                        apimOrgName="${{ github.event.inputs.orgName }}" \
                        apimSku="${{ github.event.inputs.apimSku }}"
+        # Setup .NET using .NET SDK
+      - name: Setup .NET
+        run: |
+          echo "Installing .NET SDK"
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x ./dotnet-install.sh
+          ./dotnet-install.sh --version 9.0.100-preview.4.24260.5 --install-dir ~/.dotnet
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          
+      # Build and publish .NET application
+      - name: Build and publish
+        run: |
+          dotnet publish APIMDemo/APIMDemo.csproj -c Release -o ./publish
+      
+      # Deploy to Azure App Service using Azure CLI
+      - name: Deploy to Azure App Service
+        run: |
+          APP_NAME="${{ github.event.inputs.namePrefix }}-${{ github.event.inputs.environment }}-api"
+          echo "Deploying to App Service: $APP_NAME"
+          
+          # Create zip deployment package
+          cd publish
+          zip -r ../app-deploy.zip .
+          cd ..
+          
+          # Deploy to App Service
+          az webapp deployment source config-zip \
+            --resource-group "${{ github.event.inputs.resourceGroup }}" \
+            --name "$APP_NAME" \
+            --src "app-deploy.zip"
