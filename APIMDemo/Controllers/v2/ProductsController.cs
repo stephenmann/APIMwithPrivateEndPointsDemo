@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace APIMDemo.Controllers.v2;
 
 [ApiController]
-[Route("api/v2/products")]
+[Route("api/products")]
 [ApiVersion("2.0")]
 public class ProductsController : ControllerBase
 {

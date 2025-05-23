@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace APIMDemo.Controllers.v1;
 
 [ApiController]
-[Route("api/v1/orders")]
+[Route("api/orders")]
 [ApiVersion("1.0")]
 public class OrdersController : ControllerBase
 {
